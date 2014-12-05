@@ -1,6 +1,9 @@
-dfu_flasher_pc
+STM32 ISP USART flasher
 ==============
 
-USB DFU flasher cross-platform PC interface
+Cross-platform GUI for STM32 flashing.
 
-PC GUI software for: https://github.com/alexeyk13/dfu_flasher
+* Flash files
+* Dump files
+* Mass erase
+* Read protection

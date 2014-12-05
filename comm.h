@@ -11,9 +11,12 @@
 #include <QStringList>
 #include <QColor>
 #include <QVector>
-#include <stdint.h>
 #include "common.h"
 #include "error.h"
+
+const unsigned int ISP_MASS_ERASE =                             0xffff;
+const unsigned int ISP_ERASE_BANK1 =                            0xfffe;
+const unsigned int ISP_ERASE_BANK2 =                            0xfffd;
 
 class QSerialPort;
 
@@ -59,12 +62,30 @@ public:
     ErrorProtocolNack() throw() :ErrorProtocol() {str = (QObject::tr("Protocol NACK"));}
 };
 
+class ErrorProtocolReadProtection: public ErrorProtocol
+{
+public:
+    ErrorProtocolReadProtection() throw() :ErrorProtocol() {str = (QObject::tr("Device is READ protected"));}
+};
+
+class ErrorProtocolWriteProtection: public ErrorProtocol
+{
+public:
+    ErrorProtocolWriteProtection() throw() :ErrorProtocol() {str = (QObject::tr("Device is WRITE protected"));}
+};
+
+class ErrorProtocolVerify: public ErrorProtocol
+{
+public:
+    ErrorProtocolVerify() throw() :ErrorProtocol() {str = (QObject::tr("Page VERIFY failed"));}
+};
+
 class Comm : public QObject
 {
     Q_OBJECT
 private:
     QSerialPort* com;
-    QVector<uint8_t> supportedCmds;
+    QVector<unsigned char> supportedCmds;
 
 protected:
     void info(const QString& text, const QColor& color = Qt::black) {log(LOG_TYPE_DEFAULT, text, color);}
@@ -73,6 +94,7 @@ protected:
     void error(const QString& text) {log(LOG_TYPE_ERROR, text, Qt::black);}
     void debug(const QString& text) {log(LOG_TYPE_DEBUG, text, Qt::black);}
 
+    void ispStart();
     QByteArray rx(unsigned int maxSize);
     unsigned char rxChar();
     void rxAck();
@@ -95,8 +117,17 @@ public:
     unsigned char cmdGetVersion();
     unsigned short cmdGetID();
     QByteArray cmdReadMemory(unsigned int addr, unsigned int size);
+    void cmdGo(unsigned int addr);
+    void cmdWriteMemory(unsigned int addr, const QByteArray& data);
+    void cmdEraseMemory(unsigned int page);
+    void cmdEraseMemoryEx(unsigned int page);
+    void cmdReadoutProtect();
+    void cmdReadoutUnProtect();
 
     void dump(const QString& fileName, unsigned int addr, unsigned int size);
+    void erase(unsigned int addr, unsigned int size);
+    void flash(const QByteArray& data, unsigned int addr, bool verify = true);
+    void flash(const QString& fileName, unsigned int addr, bool verify = true);
 signals:
     void log(LOG_TYPE type, const QString& text, const QColor& color);
 

@@ -25,6 +25,33 @@ Comm::~Comm()
     delete com;
 }
 
+void Comm::ispStart()
+{
+    for (int i = 0; i < ACK_TIMEOUT_COUNT; ++i)
+    {
+        com->putChar(ISP_START_FRAME);
+        if (com->waitForReadyRead(10))
+        {
+            char c;
+            while (com->getChar(&c))
+            {
+                if (c == ISP_ACK)
+                {
+                    info(QObject::tr("Device ACK\n"));
+                    return;
+                }
+                if (c == ISP_NACK)
+                {
+                    info(QObject::tr("Device already connected\n"));
+                    return;
+                }
+            }
+        }
+        QCoreApplication::processEvents();
+    }
+    throw ErrorPortTimeout();
+}
+
 QByteArray Comm::rx(unsigned int maxSize)
 {
     QByteArray buf;
@@ -106,32 +133,16 @@ void Comm::open(const QString &name, unsigned int speed)
     com->setParity(QSerialPort::EvenParity);
     com->setFlowControl(QSerialPort::NoFlowControl);
 
-    hint(tr("Enter ISP mode and connect device...\n"));
     try
     {
-        for (int i = 0; i < ACK_TIMEOUT_COUNT; ++i)
-        {
-            com->putChar(ISP_START_FRAME);
-            if (com->waitForReadyRead(10))
-            {
-                char c;
-                while (com->getChar(&c))
-                {
-                    if (c == ISP_ACK)
-                    {
-                        info(QObject::tr("Device ACK\n"));
-                        return;
-                    }
-                    if (c == ISP_NACK)
-                    {
-                        info(QObject::tr("Device already connected\n"));
-                        return;
-                    }
-                }
-            }
-            QCoreApplication::processEvents();
-        }
-        throw ErrorPortTimeout();
+        hint(tr("Enter ISP mode and connect device...\n"));
+        ispStart();
+        unsigned char version;
+        unsigned short pid;
+        version = cmdGet();
+        info(QString(tr("ISP loader version: %1.%2\n")).arg(version >> 4).arg(version & 0xf));
+        pid = cmdGetID();
+        info(QString(tr("PID: 0x%1\n")).arg(pid, 4, 16, QChar('0')));
     }
     catch (...)
     {
@@ -202,7 +213,15 @@ unsigned short Comm::cmdGetID()
 QByteArray Comm::cmdReadMemory(unsigned int addr, unsigned int size)
 {
     QByteArray buf;
-    txReq(ISP_READ_MEMORY);
+    try
+    {
+        txReq(ISP_READ_MEMORY);
+    }
+    catch (ErrorProtocolNack)
+    {
+        throw ErrorProtocolReadProtection();
+    }
+
     txAddr(addr);
     tx(QByteArray().append(static_cast<char>(size - 1)));
 
@@ -211,6 +230,86 @@ QByteArray Comm::cmdReadMemory(unsigned int addr, unsigned int size)
         throw ErrorPortTimeout();
 
     return buf;
+}
+
+void Comm::cmdGo(unsigned int addr)
+{
+    txReq(ISP_GO);
+    txAddr(addr);
+    com->close();
+}
+
+void Comm::cmdWriteMemory(unsigned int addr, const QByteArray &data)
+{
+    try
+    {
+        txReq(ISP_WRITE_MEMORY);
+    }
+    catch (ErrorProtocolNack)
+    {
+        throw ErrorProtocolWriteProtection();
+    }
+
+    txAddr(addr);
+    tx(QByteArray().append(static_cast<char>(data.size() - 1)).append(data));
+}
+
+void Comm::cmdEraseMemory(unsigned int page)
+{
+    try
+    {
+        txReq(ISP_ERASE_MEMORY);
+    }
+    catch (ErrorProtocolNack)
+    {
+        throw ErrorProtocolWriteProtection();
+    }
+    QByteArray buf;
+    if (page != ISP_MASS_ERASE)
+        buf.append(static_cast<char>(0x00));
+    buf.append(static_cast<char>(page & 0xff));
+    tx(buf);
+    //device will reset
+    if (page == ISP_MASS_ERASE)
+        com->close();
+}
+
+void Comm::cmdEraseMemoryEx(unsigned int page)
+{
+    try
+    {
+        txReq(ISP_ERASE_MEMORY_EX);
+    }
+    catch (ErrorProtocolNack)
+    {
+        throw ErrorProtocolWriteProtection();
+    }
+    QByteArray buf;
+    if (page != ISP_ERASE_BANK1 && page != ISP_ERASE_BANK2 && page != ISP_MASS_ERASE)
+    {
+        buf.append(static_cast<char>(0 >> 8));
+        buf.append(static_cast<char>(0 & 0xff));
+    }
+    buf.append(static_cast<char>(page >> 8));
+    buf.append(static_cast<char>(page & 0xff));
+    tx(buf);
+    //device will reset
+    if (page == ISP_MASS_ERASE)
+        com->close();
+}
+
+void Comm::cmdReadoutProtect()
+{
+    txReq(ISP_READOUT_PROTECT);
+    rxAck();
+    com->close();
+}
+
+void Comm::cmdReadoutUnProtect()
+{
+    txReq(ISP_READOUT_UNPROTECT);
+    rxAck();
+    com->close();
 }
 
 void Comm::dump(const QString &fileName, unsigned int addr, unsigned int size)
@@ -237,20 +336,134 @@ void Comm::dump(const QString &fileName, unsigned int addr, unsigned int size)
                     {
                         info(QObject::tr("\n"));
                         warning(QString(QObject::tr("Retrain at: 0x%1")).arg(i * PAGE_SIZE + addr, 8, 16, QChar('0')));
+                        continue;
+                    }
+                    throw;
+                }
+            }
+            if (i && ((i % REFRESH_RATE) == 0))
+                info(".");
+        }
+        info(QObject::tr(".Ok!\n"));
+        file.close();
+    }
+    catch (...)
+    {
+        info(QString(QObject::tr(".Fail! at 0x%1\n").arg(addr + i * PAGE_SIZE, 8, 16, QChar('0'))));
+        file.close();
+        throw;
+    }
+}
+
+void Comm::erase(unsigned int addr, unsigned int size)
+{
+    unsigned int i;
+    try
+    {
+        info(QString(QObject::tr("Erasing 0x%1-0x%2")).arg(addr, 8, 16, QChar('0')).arg(addr + size, 8, 16, QChar('0')));
+        for (i = 0; i * PAGE_SIZE < size; ++i)
+        {
+            for (int retry = 0;; ++retry)
+            {
+                try
+                {
+                    if (supportedCmds.contains(ISP_ERASE_MEMORY_EX))
+                        cmdEraseMemoryEx(((i * PAGE_SIZE + addr) - FLASH_BASE) / PAGE_SIZE);
+                    else
+                        cmdEraseMemory(((i * PAGE_SIZE + addr) - FLASH_BASE) / PAGE_SIZE);
+                    break;
+                }
+                catch (...)
+                {
+                    if (retry < NRETRY)
+                    {
+                        info(QObject::tr("\n"));
+                        warning(QString(QObject::tr("Retrain at: 0x%1")).arg(i * PAGE_SIZE + addr, 8, 16, QChar('0')));
+                        continue;
+                    }
+                    throw;
+                }
+            }
+            if (i && ((i % REFRESH_RATE) == 0))
+                info(".");
+        }
+        info(QObject::tr(".Ok!\n"));
+    }
+    catch (...)
+    {
+        info(QString(QObject::tr(".Fail! at 0x%1\n").arg(addr + i * PAGE_SIZE, 8, 16, QChar('0'))));
+        throw;
+    }
+}
+
+void Comm::flash(const QByteArray &data, unsigned int addr, bool verify)
+{
+    unsigned int i;
+    try
+    {
+        info(QString(QObject::tr("Flashing")));
+        for (i = 0; i * PAGE_SIZE < static_cast<unsigned int>(data.size()); ++i)
+        {
+            QByteArray chunk(data.mid(i * PAGE_SIZE, PAGE_SIZE));
+            if (static_cast<unsigned int>(chunk.size()) < PAGE_SIZE)
+                chunk += QByteArray(PAGE_SIZE - chunk.size(), 0x0);
+            for (int retry = 0;; ++retry)
+            {
+                try
+                {
+                    cmdWriteMemory(i * PAGE_SIZE + addr, chunk);
+                    break;
+                }
+                catch (...)
+                {
+                    if (retry < NRETRY)
+                    {
+                        info(QObject::tr("\n"));
+                        warning(QString(QObject::tr("Retrain at: 0x%1")).arg(i * PAGE_SIZE + addr, 8, 16, QChar('0')));
+                        continue;
+                    }
+                    throw;
+                }
+            }
+            if (verify)
+            {
+                for (int retry = 0;; ++retry)
+                {
+                    try
+                    {
+                        if (chunk != cmdReadMemory(i * PAGE_SIZE + addr, PAGE_SIZE))
+                            throw ErrorProtocolVerify();
+                        break;
+                    }
+                    catch (...)
+                    {
+                        if (retry < NRETRY)
+                        {
+                            info(QObject::tr("\n"));
+                            warning(QString(QObject::tr("Retrain at: 0x%1")).arg(i * PAGE_SIZE + addr, 8, 16, QChar('0')));
+                        }
                     }
                 }
             }
             if (i && ((i % REFRESH_RATE) == 0))
                 info(".");
         }
-        info(QObject::tr("Ok!\n"));
-        file.close();
+        info(QObject::tr(".Ok!\n"));
     }
     catch (...)
     {
-        info(QString(QObject::tr("\nFail! at 0x%1\n").arg(addr + i * PAGE_SIZE, 8, 16, QChar('0'))));
-        file.close();
+        info(QString(QObject::tr(".Fail! at 0x%1\n").arg(addr + i * PAGE_SIZE, 8, 16, QChar('0'))));
         throw;
     }
+}
+
+void Comm::flash(const QString &fileName, unsigned int addr, bool verify)
+{
+    QFile file(fileName);
+    if (!file.open(QIODevice::ReadOnly))
+        throw ErrorFileOpen();
+    QByteArray data(file.readAll());
+    file.close();
+    flash(data, addr, verify);
 }
 

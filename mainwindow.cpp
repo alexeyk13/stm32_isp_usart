@@ -103,19 +103,15 @@ void MainWindow::log(LOG_TYPE type, const QString &text, const QColor &color)
 
 void MainWindow::on_bFlash_clicked()
 {
-    unsigned char version;
-    unsigned short pid;
+    unsigned int addr = ui->eAddress->text().toInt(0, 16);
+    unsigned int size = ui->eSize->text().toInt(0, 16);
     try
     {
         comm->open(ui->ePort->currentText(), ui->eSpeed->currentText().toInt());
         try
         {
-            version = comm->cmdGet();
-            info(QString(tr("ISP loader version: %1.%2\n")).arg(version >> 4).arg(version & 0xf));
-            pid = comm->cmdGetID();
-            info(QString(tr("PID: 0x%1\n")).arg(pid, 4, 16, QChar('0')));
-
-            comm->dump("test.bin", 0x08000000, 0x10000);
+            comm->erase(addr, size);
+            comm->flash(ui->eFile->text(), addr, true);
             comm->close();
         }
         catch (...)
@@ -139,4 +135,86 @@ void MainWindow::on_bSelectFile_clicked()
     QString name(QFileDialog::getOpenFileName(this, tr("Open File"),"",tr("Firmsware (*.bin)")));
     if (!name.isEmpty())
         ui->eFile->setText(name);
+}
+
+void MainWindow::on_bDump_clicked()
+{
+    unsigned int addr = ui->eAddress->text().toInt(0, 16);
+    unsigned int size = ui->eSize->text().toInt(0, 16);
+    try
+    {
+        comm->open(ui->ePort->currentText(), ui->eSpeed->currentText().toInt());
+        try
+        {
+            comm->dump(ui->eFile->text(), addr, size);
+            comm->close();
+        }
+        catch (...)
+        {
+            comm->close();
+            throw;
+        }
+    }
+    catch (Exception& e)
+    {
+        error(e.what() + "\n");
+    }
+    catch (...)
+    {
+        error(tr("Unhandled exception\n"));
+    }
+}
+
+void MainWindow::on_bReadProtect_clicked()
+{
+    try
+    {
+        comm->open(ui->ePort->currentText(), ui->eSpeed->currentText().toInt());
+        try
+        {
+            info(tr("Read protecting\n"));
+            comm->cmdReadoutProtect();
+            hint(tr("Read protection complete. Device is reset\n"));
+        }
+        catch (...)
+        {
+            comm->close();
+            throw;
+        }
+    }
+    catch (Exception& e)
+    {
+        error(e.what() + "\n");
+    }
+    catch (...)
+    {
+        error(tr("Unhandled exception\n"));
+    }
+}
+
+void MainWindow::on_eMassErase_clicked()
+{
+    try
+    {
+        comm->open(ui->ePort->currentText(), ui->eSpeed->currentText().toInt());
+        try
+        {
+            info(tr("Mass erasing\n"));
+            comm->cmdEraseMemoryEx(ISP_MASS_ERASE);
+            hint(tr("Mass erase complete. Device is reset\n"));
+        }
+        catch (...)
+        {
+            comm->close();
+            throw;
+        }
+    }
+    catch (Exception& e)
+    {
+        error(e.what() + "\n");
+    }
+    catch (...)
+    {
+        error(tr("Unhandled exception\n"));
+    }
 }

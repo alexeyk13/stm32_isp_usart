@@ -44,6 +44,9 @@ public slots:
 private slots:
     void on_bFlash_clicked();
     void on_bSelectFile_clicked();
+    void on_bDump_clicked();
+    void on_bReadProtect_clicked();
+    void on_eMassErase_clicked();
 };
 
 #endif // MAINWINDOW_H

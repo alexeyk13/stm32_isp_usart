@@ -21,11 +21,12 @@
 #define ISP_GET_ID                                  0x02
 
 #define ISP_READ_MEMORY                             0x11
-
-typedef struct {
-    unsigned char cmd;
-    unsigned char crc;
-} REQ;
+#define ISP_GO                                      0x21
+#define ISP_WRITE_MEMORY                            0x31
+#define ISP_ERASE_MEMORY                            0x43
+#define ISP_ERASE_MEMORY_EX                         0x44
+#define ISP_READOUT_PROTECT                         0x82
+#define ISP_READOUT_UNPROTECT                       0x92
 
 #pragma pack(pop)
 

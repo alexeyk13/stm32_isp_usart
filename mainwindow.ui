@@ -6,7 +6,7 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>582</width>
+    <width>660</width>
     <height>300</height>
    </rect>
   </property>
@@ -34,6 +34,44 @@
         </property>
         <property name="currentText">
          <string/>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="bReadProtect">
+        <property name="minimumSize">
+         <size>
+          <width>100</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>100</width>
+          <height>16777215</height>
+         </size>
+        </property>
+        <property name="text">
+         <string>Read protect</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="eMassErase">
+        <property name="minimumSize">
+         <size>
+          <width>100</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>100</width>
+          <height>16777215</height>
+         </size>
+        </property>
+        <property name="text">
+         <string>Mass Erase</string>
         </property>
        </widget>
       </item>
@@ -88,6 +126,18 @@
       </item>
       <item>
        <widget class="QLineEdit" name="eSize">
+        <property name="minimumSize">
+         <size>
+          <width>80</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>80</width>
+          <height>16777215</height>
+         </size>
+        </property>
         <property name="inputMask">
          <string>HHHHHHHH</string>
         </property>
@@ -100,6 +150,13 @@
        <widget class="QPushButton" name="bFlash">
         <property name="text">
          <string>Flash!</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="bDump">
+        <property name="text">
+         <string>Dump</string>
         </property>
        </widget>
       </item>

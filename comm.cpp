@@ -25,6 +25,16 @@ Comm::~Comm()
     delete com;
 }
 
+QByteArray Comm::rx(unsigned int maxSize)
+{
+    QByteArray buf;
+    while (static_cast<unsigned int>(buf.size()) < maxSize && com->waitForReadyRead(PORT_DEFAULT_TIMEOUT))
+        buf.append(com->read(maxSize - buf.size()));
+    if (buf.isEmpty())
+        throw ErrorPortTimeout();
+    return buf;
+}
+
 unsigned char Comm::rxChar()
 {
 
@@ -46,15 +56,37 @@ void Comm::rxAck()
         throw ErrorProtocolInvalidResponse();
 }
 
-void Comm::req(unsigned char cmd)
+void Comm::tx(const QByteArray &buf)
 {
-    QByteArray buf(sizeof(REQ), 0);
-    REQ* req = reinterpret_cast<REQ*>(buf.data());
-    req->cmd = cmd;
-    req->crc = cmd ^ 0xff;
+    char crc = buf.size() > 1 ? 0x00 : 0xff;
+    foreach (char c, buf)
+        crc ^= c;
     com->flush();
     com->write(buf);
+    com->putChar(crc);
     rxAck();
+}
+
+void Comm::txAck()
+{
+    com->putChar(ISP_ACK);
+}
+
+void Comm::txReq(unsigned char cmd)
+{
+    QByteArray buf;
+    buf.append(static_cast<char>(cmd));
+    tx(buf);
+}
+
+void Comm::txAddr(unsigned int addr)
+{
+    QByteArray buf;
+    buf.append(static_cast<char>((addr >> 24) & 0xff));
+    buf.append(static_cast<char>((addr >> 16) & 0xff));
+    buf.append(static_cast<char>((addr >> 8) & 0xff));
+    buf.append(static_cast<char>((addr >> 0) & 0xff));
+    tx(buf);
 }
 
 bool Comm::isActive()
@@ -62,16 +94,16 @@ bool Comm::isActive()
     return com->isOpen();
 }
 
-void Comm::open(const QString &name)
+void Comm::open(const QString &name, unsigned int speed)
 {
     com->close();
     com->setPortName(name);
     if (!com->open(QIODevice::ReadWrite))
         throw ErrorPortOpen();
-    com->setBaudRate(PORT_BAUD);
+    com->setBaudRate(speed);
     com->setDataBits(QSerialPort::Data8);
     com->setStopBits(QSerialPort::OneStop);
-    com->setParity(QSerialPort::NoParity);
+    com->setParity(QSerialPort::EvenParity);
     com->setFlowControl(QSerialPort::NoFlowControl);
 
     hint(tr("Enter ISP mode and connect device...\n"));
@@ -126,7 +158,7 @@ unsigned char Comm::cmdGet()
     if (!com->isOpen())
         throw ErrorNotActive();
 
-    req(ISP_GET);
+    txReq(ISP_GET);
     int len = rxChar();
     unsigned char version = rxChar();
     supportedCmds.clear();
@@ -142,7 +174,7 @@ unsigned char Comm::cmdGetVersion()
     if (!com->isOpen())
         throw ErrorNotActive();
 
-    req(ISP_GET_VERSION);
+    txReq(ISP_GET_VERSION);
     unsigned char version = rxChar();
     rxChar();
     rxChar();
@@ -157,7 +189,7 @@ unsigned short Comm::cmdGetID()
     if (!com->isOpen())
         throw ErrorNotActive();
 
-    req(ISP_GET_ID);
+    txReq(ISP_GET_ID);
     //len
     rxChar();
     pid = rxChar() << 8;
@@ -165,5 +197,60 @@ unsigned short Comm::cmdGetID()
     rxAck();
 
     return pid;
+}
+
+QByteArray Comm::cmdReadMemory(unsigned int addr, unsigned int size)
+{
+    QByteArray buf;
+    txReq(ISP_READ_MEMORY);
+    txAddr(addr);
+    tx(QByteArray().append(static_cast<char>(size - 1)));
+
+    buf = rx(size);
+    if (static_cast<unsigned int>(buf.size()) < size)
+        throw ErrorPortTimeout();
+
+    return buf;
+}
+
+void Comm::dump(const QString &fileName, unsigned int addr, unsigned int size)
+{
+    QFile file(fileName);
+    if (!file.open(QIODevice::WriteOnly))
+        throw ErrorFileOpen();
+    unsigned int i;
+    try
+    {
+        info(QString(QObject::tr("Dumping 0x%1-0x%2")).arg(addr, 8, 16, QChar('0')).arg(addr + size, 8, 16, QChar('0')));
+        for (i = 0; i * PAGE_SIZE < size; ++i)
+        {
+            for (int retry = 0;; ++retry)
+            {
+                try
+                {
+                    file.write(cmdReadMemory(i * PAGE_SIZE + addr, PAGE_SIZE));
+                    break;
+                }
+                catch (...)
+                {
+                    if (retry < NRETRY)
+                    {
+                        info(QObject::tr("\n"));
+                        warning(QString(QObject::tr("Retrain at: 0x%1")).arg(i * PAGE_SIZE + addr, 8, 16, QChar('0')));
+                    }
+                }
+            }
+            if (i && ((i % REFRESH_RATE) == 0))
+                info(".");
+        }
+        info(QObject::tr("Ok!\n"));
+        file.close();
+    }
+    catch (...)
+    {
+        info(QString(QObject::tr("\nFail! at 0x%1\n").arg(addr + i * PAGE_SIZE, 8, 16, QChar('0'))));
+        file.close();
+        throw;
+    }
 }
 

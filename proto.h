@@ -20,6 +20,7 @@
 #define ISP_GET_VERSION                             0x01
 #define ISP_GET_ID                                  0x02
 
+#define ISP_READ_MEMORY                             0x11
 
 typedef struct {
     unsigned char cmd;

@@ -73,15 +73,19 @@ protected:
     void error(const QString& text) {log(LOG_TYPE_ERROR, text, Qt::black);}
     void debug(const QString& text) {log(LOG_TYPE_DEBUG, text, Qt::black);}
 
+    QByteArray rx(unsigned int maxSize);
     unsigned char rxChar();
     void rxAck();
-    void req(unsigned char cmd);
+    void tx(const QByteArray& buf);
+    void txAck();
+    void txReq(unsigned char cmd);
+    void txAddr(unsigned int addr);
 public:
     explicit Comm(QObject *parent = 0);
     virtual ~Comm();
 
     bool isActive();
-    void open(const QString& name);
+    void open(const QString& name, unsigned int speed);
     void close();
 
     QStringList ports();
@@ -90,6 +94,9 @@ public:
     unsigned char cmdGet();
     unsigned char cmdGetVersion();
     unsigned short cmdGetID();
+    QByteArray cmdReadMemory(unsigned int addr, unsigned int size);
+
+    void dump(const QString& fileName, unsigned int addr, unsigned int size);
 signals:
     void log(LOG_TYPE type, const QString& text, const QColor& color);
 

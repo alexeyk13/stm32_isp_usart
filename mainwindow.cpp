@@ -29,6 +29,17 @@ MainWindow::MainWindow(QWidget *parent) :
     info(tr("Application started\n"));
 
     ui->ePort->addItems(comm->ports());
+    ui->eSpeed->addItem("1200");
+    ui->eSpeed->addItem("2400");
+    ui->eSpeed->addItem("4800");
+    ui->eSpeed->addItem("9600");
+    ui->eSpeed->addItem("14400");
+    ui->eSpeed->addItem("19200");
+    ui->eSpeed->addItem("28800");
+    ui->eSpeed->addItem("38400");
+    ui->eSpeed->addItem("57600");
+    ui->eSpeed->addItem("115200");
+    ui->eSpeed->setCurrentText("115200");
 }
 
 MainWindow::~MainWindow()
@@ -96,13 +107,15 @@ void MainWindow::on_bFlash_clicked()
     unsigned short pid;
     try
     {
-        comm->open(ui->ePort->currentText());
+        comm->open(ui->ePort->currentText(), ui->eSpeed->currentText().toInt());
         try
         {
             version = comm->cmdGet();
             info(QString(tr("ISP loader version: %1.%2\n")).arg(version >> 4).arg(version & 0xf));
             pid = comm->cmdGetID();
             info(QString(tr("PID: 0x%1\n")).arg(pid, 4, 16, QChar('0')));
+
+            comm->dump("test.bin", 0x08000000, 0x10000);
             comm->close();
         }
         catch (...)

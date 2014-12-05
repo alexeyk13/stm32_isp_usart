@@ -8,14 +8,43 @@
 #define COMM_H
 
 #include <QObject>
+#include <QStringList>
 #include <QColor>
+#include <QVector>
+#include <stdint.h>
 #include "common.h"
 #include "error.h"
+
+class QSerialPort;
+
+class ErrorPort: public Exception
+{
+public:
+    ErrorPort() throw() :Exception() {str = (QObject::tr("Generic port error"));}
+};
+
+class ErrorPortOpen: public Exception
+{
+public:
+    ErrorPortOpen() throw() :Exception() {str = (QObject::tr("Port open error"));}
+};
+
+class ErrorPortTimeout: public Exception
+{
+public:
+    ErrorPortTimeout() throw() :Exception() {str = (QObject::tr("Port timeout"));}
+};
 
 class ErrorProtocol: public Exception
 {
 public:
     ErrorProtocol() throw() :Exception() {str = (QObject::tr("Generic protocol error"));}
+};
+
+class ErrorProtocolTimeout: public ErrorProtocol
+{
+public:
+    ErrorProtocolTimeout() throw() :ErrorProtocol() {str = (QObject::tr("Protocol timeout"));}
 };
 
 class ErrorProtocolInvalidResponse: public ErrorProtocol
@@ -24,13 +53,18 @@ public:
     ErrorProtocolInvalidResponse() throw() :ErrorProtocol() {str = (QObject::tr("Protocol invalid response"));}
 };
 
-class DFUD;
+class ErrorProtocolNack: public ErrorProtocol
+{
+public:
+    ErrorProtocolNack() throw() :ErrorProtocol() {str = (QObject::tr("Protocol NACK"));}
+};
 
 class Comm : public QObject
 {
     Q_OBJECT
 private:
-    DFUD* dfud;
+    QSerialPort* com;
+    QVector<uint8_t> supportedCmds;
 
 protected:
     void info(const QString& text, const QColor& color = Qt::black) {log(LOG_TYPE_DEFAULT, text, color);}
@@ -39,24 +73,23 @@ protected:
     void error(const QString& text) {log(LOG_TYPE_ERROR, text, Qt::black);}
     void debug(const QString& text) {log(LOG_TYPE_DEBUG, text, Qt::black);}
 
-    void cmdReq(unsigned char cmd, unsigned int param1, unsigned int param2, QByteArray data = QByteArray());
-
+    unsigned char rxChar();
+    void rxAck();
+    void req(unsigned char cmd);
 public:
     explicit Comm(QObject *parent = 0);
     virtual ~Comm();
 
     bool isActive();
-    bool open();
+    void open(const QString& name);
     void close();
 
-    void cmdVersion(int& loader, int& protocol);
-    void cmdLeave();
-    QByteArray cmdRead(unsigned int addr, unsigned int size);
-    void cmdWrite(unsigned int addr, const QByteArray& buf);
-    void cmdErase(unsigned int addr, unsigned int size);
+    QStringList ports();
 
-    void flash(const QString& fileName, unsigned int addr, unsigned int size);
 
+    unsigned char cmdGet();
+    unsigned char cmdGetVersion();
+    unsigned short cmdGetID();
 signals:
     void log(LOG_TYPE type, const QString& text, const QColor& color);
 

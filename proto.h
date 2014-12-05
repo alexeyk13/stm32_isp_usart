@@ -11,6 +11,20 @@
 
 #pragma pack(push, 1)
 
+#define ISP_START_FRAME                             0x7f
+
+#define ISP_ACK                                     0x79
+#define ISP_NACK                                    0x1f
+
+#define ISP_GET                                     0x00
+#define ISP_GET_VERSION                             0x01
+#define ISP_GET_ID                                  0x02
+
+
+typedef struct {
+    unsigned char cmd;
+    unsigned char crc;
+} REQ;
 
 #pragma pack(pop)
 

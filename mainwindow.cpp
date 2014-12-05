@@ -27,6 +27,8 @@ MainWindow::MainWindow(QWidget *parent) :
     comm = new Comm(this);
     connect(comm, SIGNAL(log(LOG_TYPE,QString,QColor)), this, SLOT(log(LOG_TYPE,QString,QColor)));
     info(tr("Application started\n"));
+
+    ui->ePort->addItems(comm->ports());
 }
 
 MainWindow::~MainWindow()
@@ -90,31 +92,24 @@ void MainWindow::log(LOG_TYPE type, const QString &text, const QColor &color)
 
 void MainWindow::on_bFlash_clicked()
 {
+    unsigned char version;
+    unsigned short pid;
     try
     {
-        if (comm->open())
+        comm->open(ui->ePort->currentText());
+        try
         {
-            info(tr("DFU device connected\n"));
-            try
-            {
-                int loader, protocol;
-                comm->cmdVersion(loader, protocol);
-                info(QString(QObject::tr("Loader version: %1.%2\n")).arg(loader >> 8).arg(loader & 0xff));
-                info(QString(QObject::tr("Protocol version: %1.%2\n")).arg(protocol >> 8).arg(protocol & 0xff));
-                comm->flash(ui->eFile->text(), ui->eAddress->text().toInt(NULL, 16), ui->eSize->text().toInt(NULL, 16));
-                hint(tr("Flash complete, resetting device\n"));
-                comm->cmdLeave();
-                comm->close();
-                info(tr("DFU device disconnected\n"));
-            }
-            catch (...)
-            {
-                comm->close();
-                throw;
-            }
+            version = comm->cmdGet();
+            info(QString(tr("ISP loader version: %1.%2\n")).arg(version >> 4).arg(version & 0xf));
+            pid = comm->cmdGetID();
+            info(QString(tr("PID: 0x%1\n")).arg(pid, 4, 16, QChar('0')));
+            comm->close();
         }
-        else
-            warning(tr("USB DFU device not found\n"));
+        catch (...)
+        {
+            comm->close();
+            throw;
+        }
     }
     catch (Exception& e)
     {

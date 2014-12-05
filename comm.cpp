@@ -5,113 +5,165 @@
 */
 
 #include "comm.h"
-#include "usb/dfud.h"
 #include "config.h"
 #include "error.h"
 #include "proto.h"
 #include <QFile>
+#include <QtSerialPort/QSerialPortInfo>
+#include <QtSerialPort/QSerialPort>
+#include <QCoreApplication>
+#include "delay.h"
 
 Comm::Comm(QObject *parent) :
     QObject(parent)
 {
-    dfud = new DFUD();
+    com = new QSerialPort();
 }
 
 Comm::~Comm()
 {
-    delete dfud;
+    delete com;
 }
 
-void Comm::cmdReq(unsigned char cmd, unsigned int param1, unsigned int param2, QByteArray data)
+unsigned char Comm::rxChar()
 {
-    QByteArray buf(sizeof(PROTO_REQ), 0);
-    PROTO_REQ* proto = reinterpret_cast<PROTO_REQ*>(buf.data());
-    proto->cmd = cmd;
-    proto->data_size = data.size();
-    proto->param1 = param1;
-    proto->param2 = param2;
-    dfud->write(buf + data);
+
+    if (com->waitForReadyRead(PORT_DEFAULT_TIMEOUT))
+    {
+        unsigned char c;
+        if (com->getChar(reinterpret_cast<char*>(&c)))
+            return c;
+    }
+    throw ErrorPortTimeout();
+}
+
+void Comm::rxAck()
+{
+    unsigned char c = rxChar();
+    if (c == ISP_NACK)
+        throw ErrorProtocolNack();
+    if (c != ISP_ACK)
+        throw ErrorProtocolInvalidResponse();
+}
+
+void Comm::req(unsigned char cmd)
+{
+    QByteArray buf(sizeof(REQ), 0);
+    REQ* req = reinterpret_cast<REQ*>(buf.data());
+    req->cmd = cmd;
+    req->crc = cmd ^ 0xff;
+    com->flush();
+    com->write(buf);
+    rxAck();
 }
 
 bool Comm::isActive()
 {
-    return dfud->isActive();
+    return com->isOpen();
 }
 
-bool Comm::open()
+void Comm::open(const QString &name)
 {
-    if (!dfud->open(VID, PID))
-        return false;
-    return true;
+    com->close();
+    com->setPortName(name);
+    if (!com->open(QIODevice::ReadWrite))
+        throw ErrorPortOpen();
+    com->setBaudRate(PORT_BAUD);
+    com->setDataBits(QSerialPort::Data8);
+    com->setStopBits(QSerialPort::OneStop);
+    com->setParity(QSerialPort::NoParity);
+    com->setFlowControl(QSerialPort::NoFlowControl);
+
+    hint(tr("Enter ISP mode and connect device...\n"));
+    try
+    {
+        for (int i = 0; i < ACK_TIMEOUT_COUNT; ++i)
+        {
+            com->putChar(ISP_START_FRAME);
+            if (com->waitForReadyRead(10))
+            {
+                char c;
+                while (com->getChar(&c))
+                {
+                    if (c == ISP_ACK)
+                    {
+                        info(QObject::tr("Device ACK\n"));
+                        return;
+                    }
+                    if (c == ISP_NACK)
+                    {
+                        info(QObject::tr("Device already connected\n"));
+                        return;
+                    }
+                }
+            }
+            QCoreApplication::processEvents();
+        }
+        throw ErrorPortTimeout();
+    }
+    catch (...)
+    {
+        com->close();
+        throw;
+    }
 }
 
 void Comm::close()
 {
-    dfud->close();
+    com->close();
 }
 
-void Comm::cmdVersion(int& loader, int& protocol)
+QStringList Comm::ports()
 {
-    cmdReq(PROTO_CMD_VERSION, 0, 0);
-    QByteArray buf(dfud->read());
-    if (static_cast<unsigned int>(buf.size()) < sizeof(PROTO_VERSION_RESP))
-        throw ErrorProtocolInvalidResponse();
-    PROTO_VERSION_RESP* version = reinterpret_cast<PROTO_VERSION_RESP*>(buf.data());
-    loader = version->loader;
-    protocol = version->protocol;
+    QStringList res;
+    foreach (const QSerialPortInfo &info, QSerialPortInfo::availablePorts())
+        res << info.portName();
+    return res;
 }
 
-void Comm::cmdLeave()
+unsigned char Comm::cmdGet()
 {
-    cmdReq(PROTO_CMD_LEAVE, 0, 0);
+    if (!com->isOpen())
+        throw ErrorNotActive();
+
+    req(ISP_GET);
+    int len = rxChar();
+    unsigned char version = rxChar();
+    supportedCmds.clear();
+    for (int i = 0; i < len; ++i)
+        supportedCmds.append(rxChar());
+    rxAck();
+
+    return version;
 }
 
-QByteArray Comm::cmdRead(unsigned int addr, unsigned int size)
+unsigned char Comm::cmdGetVersion()
 {
-    cmdReq(PROTO_CMD_READ, addr, size);
-    QByteArray buf(dfud->read());
-    if (static_cast<unsigned int>(buf.size()) < size)
-        throw ErrorProtocolInvalidResponse();
-    return buf;
+    if (!com->isOpen())
+        throw ErrorNotActive();
+
+    req(ISP_GET_VERSION);
+    unsigned char version = rxChar();
+    rxChar();
+    rxChar();
+    rxAck();
+
+    return version;
 }
 
-void Comm::cmdWrite(unsigned int addr, const QByteArray &buf)
+unsigned short Comm::cmdGetID()
 {
-    cmdReq(PROTO_CMD_WRITE, addr, buf.size(), buf);
+    unsigned short pid;
+    if (!com->isOpen())
+        throw ErrorNotActive();
+
+    req(ISP_GET_ID);
+    //len
+    rxChar();
+    pid = rxChar() << 8;
+    pid |= rxChar();
+    rxAck();
+
+    return pid;
 }
 
-void Comm::cmdErase(unsigned int addr, unsigned int size)
-{
-    cmdReq(PROTO_CMD_ERASE, addr, size);
-}
-
-void Comm::flash(const QString &fileName, unsigned int addr, unsigned int size)
-{
-    unsigned int i;
-    QFile fwFile(fileName);
-    if (!fwFile.open(QIODevice::ReadOnly))
-        throw ErrorFileOpen();
-    QByteArray fw(fwFile.readAll());
-    fwFile.close();
-
-    info(QString(tr("Erasing: 0x%1-0x%2")).arg(addr, 8, 16, QChar('0')).arg(addr + size, 8, 16, QChar('0')));
-    for (i = 0; i * DFU_BLOCK_SIZE < size; ++i)
-    {
-        cmdErase(i * DFU_BLOCK_SIZE + addr, DFU_BLOCK_SIZE);
-        if (i && ((i % REFRESH_RATE) == 0))
-            info(".");
-    }
-    info("\n");
-
-    info(QString(tr("Flashing: 0x%1")).arg(addr, 8, 16, QChar('0')));
-    for (i = 0; i * DFU_BLOCK_SIZE < static_cast<unsigned int>(fw.size()); ++i)
-    {
-        QByteArray chunk(fw.mid(i * DFU_BLOCK_SIZE, DFU_BLOCK_SIZE));
-        if (static_cast<unsigned int>(chunk.size()) < DFU_BLOCK_SIZE)
-            chunk += QByteArray(DFU_BLOCK_SIZE - chunk.size(), 0x0);
-        cmdWrite(i * DFU_BLOCK_SIZE + addr, chunk);
-        if (i && ((i % REFRESH_RATE) == 0))
-            info(".");
-    }
-    info("\n");
-}

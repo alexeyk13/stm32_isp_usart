@@ -4,7 +4,7 @@
 #
 #-------------------------------------------------
 
-QT       += core gui widgets
+QT       += core gui widgets serialport
 
 TARGET = stm32_isp_usart
 TEMPLATE = app
@@ -25,12 +25,12 @@ HEADERS  += mainwindow.h \
 FORMS    += mainwindow.ui
 
 linux*{
-LIBS += -ludev -lusb-1.0
+LIBS += -ludev
 DEFINES += HAVE_LIBUDEV
 }
 
 win32*{
-LIBS += -lsetupapi -lusb-1.0
+LIBS += -lsetupapi
 }
 
 CONFIG += exceptions
